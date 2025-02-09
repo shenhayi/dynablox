@@ -62,6 +62,8 @@ class MotionVisualizer {
     // Crop all visualizations at this height for better visibility.
     float visualization_max_z = 10000.f;
 
+    std::string dataSaveFolder = "";
+
     Config() { setConfigName("MotionVisualizer"); }
 
    protected:
@@ -99,7 +101,9 @@ class MotionVisualizer {
                             const CloudInfo& cloud_info) const;
   void visualizeClusters(const Clusters& clusters,
                          const std::string& ns = "") const;
-
+  void saveDetectionsCallback(const Cloud& cloud,
+                              const CloudInfo& cloud_info,
+                              const std::vector<Cluster>& clusters);
   // ROS msg helper tools.
   static geometry_msgs::Vector3 setScale(const float scale);
   static std_msgs::ColorRGBA setColor(const std::vector<float>& color);

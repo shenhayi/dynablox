@@ -50,6 +50,7 @@ void MotionVisualizer::Config::setupParamsAndPrinting() {
   setupParam("slice_height", &slice_height, "m");
   setupParam("slice_relative_to_sensor", &slice_relative_to_sensor);
   setupParam("visualization_max_z", &visualization_max_z, "m");
+  setupParam("datasave_folder", &dataSaveFolder);
 }
 
 void MotionVisualizer::Config::checkColor(const std::vector<float>& color,
@@ -130,6 +131,7 @@ void MotionVisualizer::visualizeAll(const Cloud& cloud,
   visualizePointDetections(cloud, cloud_info);
   visualizeClusterDetections(cloud, cloud_info, clusters);
   visualizeObjectDetections(cloud, cloud_info, clusters);
+  saveDetectionsCallback(cloud, cloud_info, clusters);
   visualizeGroundTruth(cloud, cloud_info);
   visualizeMesh();
   visualizeEverFree();
@@ -142,6 +144,117 @@ void MotionVisualizer::visualizeAll(const Cloud& cloud,
   visualizeSlicePoints(cloud, cloud_info);
   visualizeClusters(clusters);
   time_stamp_set_ = false;
+}
+
+void MotionVisualizer::saveDetectionsCallback(const Cloud& cloud,
+                                               const CloudInfo& cloud_info,
+                                               const std::vector<Cluster>& clusters){
+  std::string time_str = std::to_string(ros::Time::now().toNSec());
+  
+  boost::filesystem::path base_dir(config_.dataSaveFolder);
+  boost::filesystem::path json_folder = base_dir / "dynablox_det_box";
+  
+  if (!boost::filesystem::exists(json_folder)) {
+    if (!boost::filesystem::create_directory(json_folder)) {
+      ROS_ERROR_STREAM("Failed to create JSON folder: " << json_folder.string());
+      return;
+    } else {
+      ROS_INFO_STREAM("Created JSON folder: " << json_folder.string());
+    }
+  }
+  
+  boost::filesystem::path json_file_path = json_folder / (time_str + ".json");
+  
+  std::ofstream json_file(json_file_path.string().c_str(), std::ios::out);
+  if (!json_file.is_open()) {
+    ROS_ERROR_STREAM("JSON file open error: " << json_file_path.string());
+    return;
+  }
+  
+  std::vector<std::string> detection_entries;
+  int detection_id = 0;
+  
+  for (const Cluster& cluster : clusters) {
+    if (!cluster.valid) {
+      continue;
+    }
+    
+    double min_x = std::numeric_limits<double>::max();
+    double min_y = std::numeric_limits<double>::max();
+    double min_z = std::numeric_limits<double>::max();
+    double max_x = std::numeric_limits<double>::lowest();
+    double max_y = std::numeric_limits<double>::lowest();
+    double max_z = std::numeric_limits<double>::lowest();
+
+    for (int idx : cluster.points) {
+      const auto& pt = cloud.points[idx];
+
+      if (pt.z > config_.visualization_max_z)
+        continue;
+
+      min_x = std::min(min_x, static_cast<double>(pt.x));
+      min_y = std::min(min_y, static_cast<double>(pt.y));
+      min_z = std::min(min_z, static_cast<double>(pt.z));
+
+      max_x = std::max(max_x, static_cast<double>(pt.x));
+      max_y = std::max(max_y, static_cast<double>(pt.y));
+      max_z = std::max(max_z, static_cast<double>(pt.z));
+    }
+    
+    if (min_x == std::numeric_limits<double>::max() ||
+        min_y == std::numeric_limits<double>::max() ||
+        min_z == std::numeric_limits<double>::max())
+    {
+      continue;
+    }
+    
+    double cx = (min_x + max_x) / 2.0;
+    double cy = (min_y + max_y) / 2.0;
+    double cz = (min_z + max_z) / 2.0;
+    
+    double scale_x = max_x - min_x;
+    double scale_y = max_y - min_y;
+    double scale_z = 1.7;
+    
+    std::stringstream ss;
+    ss << "  {\n";
+    ss << "    \"obj_id\": \"" << detection_id << "\",\n";
+    ss << "    \"obj_type\": \"Pedestrian\",\n";
+    ss << "    \"psr\": {\n";
+    ss << "      \"position\": {\n";
+    ss << "        \"x\": " << cx << ",\n";
+    ss << "        \"y\": " << cy << ",\n";
+    ss << "        \"z\": " << cz << "\n";
+    ss << "      },\n";
+    ss << "      \"rotation\": {\n";
+    ss << "        \"x\": 0,\n";
+    ss << "        \"y\": 0,\n";
+    ss << "        \"z\": 0\n";
+    ss << "      },\n";
+    ss << "      \"scale\": {\n";
+    ss << "        \"x\": " << scale_x << ",\n";
+    ss << "        \"y\": " << scale_y << ",\n";
+    ss << "        \"z\": " << scale_z << "\n";
+    ss << "      }\n";
+    ss << "    }\n";
+    ss << "  }";
+    
+    detection_entries.push_back(ss.str());
+    ++detection_id;
+  }
+  
+  json_file << "[\n";
+  for (size_t i = 0; i < detection_entries.size(); ++i) {
+    json_file << detection_entries[i];
+    if (i < detection_entries.size() - 1)
+      json_file << ",\n";
+    else
+      json_file << "\n";
+  }
+  json_file << "]\n";
+  
+  json_file.close();
+  // ROS_INFO_STREAM("Detection boxes saved to " << json_file_path.string());
 }
 
 void MotionVisualizer::visualizeClusters(const Clusters& clusters,
